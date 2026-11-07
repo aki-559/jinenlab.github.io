@@ -1,0 +1,58 @@
+# アップデートの設定ファイル（blackjack-dojo/app-config*.json）の書き方を確かめる。
+# 読めない JSON は、アプリでは「案内なし」として扱われ、強制アップデートが何も言われずに効かなくなるため。
+name: Validate app config
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate app-config files
+        shell: python
+        run: |
+          import json, re, sys
+
+          FILES = [
+              "blackjack-dojo/app-config.json",
+              "blackjack-dojo/app-config.debug.json",
+          ]
+          VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+          errors = []
+
+          for path in FILES:
+              try:
+                  with open(path, encoding="utf-8") as f:
+                      config = json.load(f)
+              except FileNotFoundError:
+                  errors.append(f"{path}: ファイルがありません")
+                  continue
+              except json.JSONDecodeError as e:
+                  errors.append(f"{path}: JSON として読めません（{e}）")
+                  continue
+
+              ios = config.get("ios") if isinstance(config, dict) else None
+              if not isinstance(ios, dict):
+                  errors.append(f"{path}: \"ios\" のオブジェクトがありません")
+                  continue
+
+              versions = {}
+              for key in ("minimumVersion", "recommendedVersion"):
+                  value = ios.get(key)
+                  if not isinstance(value, str) or not VERSION.match(value):
+                      errors.append(f"{path}: ios.{key} が 1.2.3 の形ではありません（{value!r}）")
+                  else:
+                      versions[key] = tuple(int(p) for p in value.split("."))
+
+              if len(versions) == 2 and versions["minimumVersion"] > versions["recommendedVersion"]:
+                  errors.append(f"{path}: ios.minimumVersion が ios.recommendedVersion より大きくなっています")
+
+              if not any(e.startswith(path) for e in errors):
+                  print(f"OK: {path} {ios}")
+
+          for e in errors:
+              print(f"::error::{e}")
+          sys.exit(1 if errors else 0)
